@@ -1,0 +1,549 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>Piiicker — Простой пикер</title>
+<style>
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+    background: #f5f6f8; color: #222;
+    padding: 16px; max-width: 900px; margin: 0 auto;
+    -webkit-tap-highlight-color: transparent;
+  }
+  h1 { font-size: 1.15rem; margin-bottom: 12px; display: flex; align-items: center; gap: 10px; }
+  h1 .count { margin-left: auto; font-size: 0.9rem; color: #666; font-weight: 400; }
+  h1 .count b { color: #222; }
+
+  .scan {
+    width: 100%; padding: 18px; font-size: 1.2rem;
+    border: 2px solid #ccd0d5; border-radius: 10px;
+    outline: none; transition: border-color .15s;
+    font-family: inherit;
+  }
+  .scan:focus { border-color: #007bff; }
+
+  .toolbar {
+    display: flex; gap: 8px; flex-wrap: wrap;
+    margin: 12px 0; align-items: center;
+  }
+  button {
+    padding: 10px 14px; font-size: 0.9rem; border: none;
+    border-radius: 8px; cursor: pointer; font-family: inherit;
+    transition: opacity .15s;
+  }
+  button:hover:not(:disabled) { opacity: 0.85; }
+  button:disabled { opacity: 0.45; cursor: not-allowed; }
+  .b-primary { background: #007bff; color: #fff; }
+  .b-share   { background: #28a745; color: #fff; }
+  .b-save    { background: #6c757d; color: #fff; }
+  .b-save.on { background: #17a2b8; }
+  .b-undo    { background: #e9ecef; color: #333; border: 1px solid #ced4da; }
+  .b-clear   { background: #dc3545; color: #fff; }
+  .b-numpad  { background: #495057; color: #fff; }
+  .b-numpad.on { background: #007bff; }
+
+  .status {
+    font-size: 0.85rem; color: #555; padding: 8px 12px;
+    background: #fff; border-radius: 8px; margin-bottom: 12px;
+    min-height: 34px; display: flex; align-items: center; gap: 8px;
+    border-left: 3px solid #ddd;
+  }
+  .status.ok    { border-left-color: #28a745; color: #155724; }
+  .status.warn  { border-left-color: #ffc107; color: #856404; }
+  .status.err   { border-left-color: #dc3545; color: #721c24; }
+
+  /* ============ Нумпад ============ */
+  .numpad {
+    background: #fff;
+    border-radius: 12px;
+    padding: 8px;
+    margin-bottom: 12px;
+    box-shadow: 0 1px 3px rgba(0,0,0,0.06);
+    user-select: none;
+    -webkit-user-select: none;
+  }
+  .numpad-grid {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 8px;
+  }
+  .numpad-btn {
+    padding: 14px 0;
+    font-size: 1.5rem;
+    font-weight: 600;
+    line-height: 1;
+    background: #f1f3f5;
+    color: #222;
+    border: 1px solid #dee2e6;
+    border-radius: 10px;
+    cursor: pointer;
+    touch-action: manipulation;
+  }
+  .numpad-btn:active { background: #e2e6ea; }
+  .numpad-bs {
+    background: #f8d7da;
+    color: #721c24;
+    border-color: #f5c2c7;
+  }
+  .numpad-bs:active { background: #f1bfc4; }
+  .numpad-enter {
+    background: #28a745;
+    color: #fff;
+    border-color: #218838;
+  }
+  .numpad-enter:active { background: #218838; }
+
+  table { width: 100%; border-collapse: collapse; background: #fff;
+          border-radius: 10px; overflow: hidden; }
+  th, td { padding: 10px 12px; text-align: left; border-bottom: 1px solid #eceeef; }
+  th { background: #f8f9fa; font-weight: 600; font-size: 0.75rem;
+       text-transform: uppercase; color: #666; }
+  td { font-size: 0.9rem; font-family: "SFMono-Regular", Consolas, monospace; }
+  td.time { color: #888; font-size: 0.82rem; width: 22%; }
+  tr:last-child td { border-bottom: none; }
+  tr.new { animation: hl .9s ease-out; }
+  @keyframes hl { from { background: #d4edda; } to { background: #fff; } }
+  .empty { text-align: center; color: #999; padding: 30px; font-style: italic; }
+  .more { text-align: center; font-size: 0.8rem; color: #999;
+          padding: 10px; font-style: italic; }
+</style>
+</head>
+<body>
+
+<h1>📝 Простой пикер <span class="count">Записано: <b id="cnt">0</b></span></h1>
+
+<input type="text" id="scan" class="scan"
+       placeholder="Пикайте что угодно…"
+       autocomplete="off" autocorrect="off" autocapitalize="off" spellcheck="false">
+
+<div class="toolbar">
+  <button class="b-numpad"  id="btnNumpad" onclick="toggleNumpad()">🔢 Цифры</button>
+  <button class="b-share"   id="btnShare"  onclick="shareCSV()">📤 Отправить</button>
+  <button class="b-primary" id="btnDown"   onclick="downloadCSV()">⬇️ Скачать</button>
+  <button class="b-save"    id="btnSave"   onclick="pickSaveFile()">💾 Автосохранение</button>
+  <button class="b-undo"    id="btnUndo"   onclick="undoLast()">↩️ Удалить последнюю</button>
+  <button class="b-clear"   id="btnClear"  onclick="clearAll()">🗑 Очистить</button>
+</div>
+
+<div class="status" id="status">Инициализация…</div>
+
+<!-- ============ Виртуальный нумпад ============ -->
+<div class="numpad" id="numpad" style="display:none">
+  <div class="numpad-grid">
+    <button class="numpad-btn" data-k="7">7</button>
+    <button class="numpad-btn" data-k="8">8</button>
+    <button class="numpad-btn" data-k="9">9</button>
+    <button class="numpad-btn" data-k="4">4</button>
+    <button class="numpad-btn" data-k="5">5</button>
+    <button class="numpad-btn" data-k="6">6</button>
+    <button class="numpad-btn" data-k="1">1</button>
+    <button class="numpad-btn" data-k="2">2</button>
+    <button class="numpad-btn" data-k="3">3</button>
+    <button class="numpad-btn numpad-bs"    data-k="bs"    aria-label="Удалить">⌫</button>
+    <button class="numpad-btn" data-k="0">0</button>
+    <button class="numpad-btn numpad-enter" data-k="enter" aria-label="Ввод">⏎</button>
+  </div>
+</div>
+
+<table>
+  <thead>
+    <tr><th class="time">Время</th><th>Значение</th></tr>
+  </thead>
+  <tbody id="tbody">
+    <tr class="empty"><td colspan="2">Пока ничего не записано</td></tr>
+  </tbody>
+</table>
+<div class="more" id="more" style="display:none"></div>
+
+<script>
+/* =========================================================
+   Константы
+   ========================================================= */
+const STORAGE_KEY = 'piiicker_raw_log_v1';
+const NUMPAD_KEY  = 'piiicker_numpad_v1';
+const SAVE_FILENAME = 'RAW_logs.csv';
+const RENDER_LIMIT = 200;
+
+/* =========================================================
+   Состояние
+   ========================================================= */
+let log = [];
+let fileHandle = null;
+let saveBroken = false;
+
+/* =========================================================
+   DOM
+   ========================================================= */
+const input   = document.getElementById('scan');
+const tbody   = document.getElementById('tbody');
+const cntEl   = document.getElementById('cnt');
+const statusEl= document.getElementById('status');
+const moreEl  = document.getElementById('more');
+const btnSave = document.getElementById('btnSave');
+const btnShare= document.getElementById('btnShare');
+const numpad  = document.getElementById('numpad');
+const btnNumpad = document.getElementById('btnNumpad');
+
+/* =========================================================
+   Утилиты
+   ========================================================= */
+function pad(n) { return n < 10 ? '0' + n : n; }
+function stamp() {
+  const d = new Date();
+  return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()) +
+    '_' + pad(d.getHours()) + '-' + pad(d.getMinutes()) + '-' + pad(d.getSeconds());
+}
+function now() {
+  const d = new Date();
+  return d.getFullYear() + '-' + pad(d.getMonth()+1) + '-' + pad(d.getDate()) +
+    ' ' + pad(d.getHours()) + ':' + pad(d.getMinutes()) + ':' + pad(d.getSeconds());
+}
+function esc(s) {
+  const d = document.createElement('div');
+  d.textContent = s;
+  return d.innerHTML;
+}
+function csvEsc(s) { return String(s).replace(/"/g, '""'); }
+
+function beep(high) {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator(), gain = ctx.createGain();
+    osc.type = 'sine';
+    osc.frequency.setValueAtTime(high ? 880 : 400, ctx.currentTime);
+    gain.gain.setValueAtTime(0.08, ctx.currentTime);
+    gain.gain.exponentialRampToValueAtTime(0.00001, ctx.currentTime + 0.12);
+    osc.connect(gain); gain.connect(ctx.destination);
+    osc.start(); osc.stop(ctx.currentTime + 0.12);
+  } catch (e) {}
+}
+
+/* =========================================================
+   localStorage
+   ========================================================= */
+function persist() {
+  try { localStorage.setItem(STORAGE_KEY, JSON.stringify(log)); }
+  catch (e) { console.warn('localStorage:', e); }
+}
+function restore() {
+  try {
+    const raw = localStorage.getItem(STORAGE_KEY);
+    if (raw) log = JSON.parse(raw) || [];
+  } catch (e) { log = []; }
+}
+
+/* =========================================================
+   CSV
+   ========================================================= */
+function buildCsv() {
+  const header = '\uFEFF"Время";"Значение"\r\n';
+  const rows = log.map(e => '"' + csvEsc(e.time) + '";"' + csvEsc(e.value) + '"').join('\r\n');
+  return header + rows;
+}
+
+/* =========================================================
+   Рендер
+   ========================================================= */
+function render(mode) {
+  cntEl.textContent = log.length;
+
+  if (log.length === 0) {
+    tbody.innerHTML = '<tr class="empty"><td colspan="2">Пока ничего не записано</td></tr>';
+    moreEl.style.display = 'none';
+    return;
+  }
+
+  const start = Math.max(0, log.length - RENDER_LIMIT);
+  const visible = log.slice(start).reverse();
+
+  tbody.innerHTML = visible.map((e, i) => {
+    const cls = (mode === 'new' && i === 0) ? ' class="new"' : '';
+    return '<tr' + cls + '><td class="time">' + esc(e.time) + '</td>' +
+           '<td>' + esc(e.value) + '</td></tr>';
+  }).join('');
+
+  if (log.length > RENDER_LIMIT) {
+    moreEl.textContent = 'Показаны последние ' + RENDER_LIMIT + ' из ' + log.length + '. Все строки — в файле.';
+    moreEl.style.display = 'block';
+  } else {
+    moreEl.style.display = 'none';
+  }
+}
+
+function focusInput() {
+  if (document.activeElement === input) return;
+  input.focus();
+}
+
+/* =========================================================
+   Нумпад
+   ========================================================= */
+function setNumpadVisible(visible) {
+  numpad.style.display = visible ? 'block' : 'none';
+  btnNumpad.classList.toggle('on', visible);
+  try { localStorage.setItem(NUMPAD_KEY, visible ? '1' : '0'); } catch (e) {}
+}
+
+function toggleNumpad() {
+  const isOpen = numpad.style.display !== 'none';
+  setNumpadVisible(!isOpen);
+  focusInput();
+}
+
+function initNumpad() {
+  document.querySelectorAll('.numpad-btn').forEach(btn => {
+    // Не даём кнопке забрать фокус у input — на десктопе и на тач-экране.
+    // pointerdown preventDefault НЕ блокирует последующий click (в отличие от touchstart).
+    btn.addEventListener('pointerdown', e => e.preventDefault());
+
+    btn.addEventListener('click', async () => {
+      const k = btn.dataset.k;
+      if (k === 'bs') {
+        input.value = input.value.slice(0, -1);
+      } else if (k === 'enter') {
+        const val = input.value.trim();
+        if (val) {
+          await addEntry(val);
+        } else {
+          focusInput();
+        }
+        return;
+      } else {
+        input.value += k;
+      }
+      focusInput();
+    });
+  });
+
+  // Восстанавливаем состояние из localStorage
+  let saved = '0';
+  try { saved = localStorage.getItem(NUMPAD_KEY) || '0'; } catch (e) {}
+  setNumpadVisible(saved === '1');
+}
+
+/* =========================================================
+   Статус
+   ========================================================= */
+function renderStatus() {
+  let level = 'warn';
+  let text = '';
+
+  if (saveBroken) {
+    level = 'err';
+    text = '❌ Ошибка записи в файл. Нажмите «Автосохранение» заново.';
+  } else if (fileHandle) {
+    level = 'ok';
+    text = '✅ Автосохранение: ' + esc(fileHandle.name);
+  } else if (window.showSaveFilePicker) {
+    level = 'warn';
+    text = '💾 Данные в памяти. Нажмите «Автосохранение», чтобы писать в файл.';
+  } else {
+    level = 'warn';
+    text = '📤 Данные в памяти. По окончании — «Отправить» или «Скачать».';
+  }
+
+  statusEl.className = 'status ' + level;
+  statusEl.innerHTML = text;
+}
+
+/* =========================================================
+   Запись в файл
+   ========================================================= */
+async function writeToFile() {
+  if (!fileHandle || saveBroken) return;
+  try {
+    if (fileHandle.queryPermission) {
+      const p = await fileHandle.queryPermission({ mode: 'readwrite' });
+      if (p !== 'granted') {
+        const r = await fileHandle.requestPermission({ mode: 'readwrite' });
+        if (r !== 'granted') { saveBroken = true; renderStatus(); return; }
+      }
+    }
+    const w = await fileHandle.createWritable();
+    await w.write(new Blob([buildCsv()], { type: 'text/csv;charset=utf-8;' }));
+    await w.close();
+  } catch (e) {
+    console.error('writeToFile:', e);
+    saveBroken = true;
+    renderStatus();
+  }
+}
+
+/* =========================================================
+   Выбор файла автосохранения
+   ========================================================= */
+async function pickSaveFile() {
+  if (!window.showSaveFilePicker) {
+    alert('Автосохранение в файл недоступно в этом браузере.\nИспользуйте «Отправить» или «Скачать».');
+    return;
+  }
+
+  if (fileHandle && !saveBroken) {
+    const ok = confirm('Файл: ' + fileHandle.name + '\n\nOK — выбрать другой файл\nОтмена — отключить автосохранение');
+    if (!ok) {
+      fileHandle = null;
+      renderStatus();
+      return;
+    }
+  }
+
+  try {
+    fileHandle = await window.showSaveFilePicker({
+      suggestedName: SAVE_FILENAME,
+      types: [{ description: 'CSV файл', accept: { 'text/csv': ['.csv'] } }]
+    });
+    saveBroken = false;
+    renderStatus();
+    await writeToFile();
+    focusInput();
+  } catch (e) {
+    if (e.name !== 'AbortError') alert('Ошибка: ' + e.message);
+  }
+}
+
+/* =========================================================
+   Отправка через Web Share API
+   ========================================================= */
+async function shareCSV() {
+  if (log.length === 0) { alert('Нет данных для отправки'); return; }
+
+  const fileName = 'RAW_logs_' + stamp() + '.csv';
+  const file = new File([buildCsv()], fileName, { type: 'text/csv' });
+
+  if (navigator.canShare && navigator.canShare({ files: [file] })) {
+    try {
+      await navigator.share({
+        files: [file],
+        title: 'Ревизия Piiicker',
+        text: 'Файл ревизии от ' + now()
+      });
+    } catch (e) {
+      if (e.name !== 'AbortError') {
+        console.error(e);
+        downloadCSV();
+      }
+    }
+  } else {
+    downloadCSV();
+  }
+  focusInput();
+}
+
+/* =========================================================
+   Скачать как файл
+   ========================================================= */
+function downloadCSV() {
+  if (log.length === 0) { alert('Нет данных для сохранения'); return; }
+  const blob = new Blob([buildCsv()], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = 'RAW_logs_' + stamp() + '.csv';
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+  focusInput();
+}
+
+/* =========================================================
+   Удалить последнюю
+   ========================================================= */
+async function undoLast() {
+  if (log.length === 0) return;
+  const last = log[log.length - 1];
+  const preview = last.value.length > 60 ? last.value.slice(0, 60) + '…' : last.value;
+  if (!confirm('Удалить последнюю запись?\n\n' + last.time + '\n' + preview)) {
+    focusInput();
+    return;
+  }
+  log.pop();
+  persist();
+  await writeToFile();
+  render('undo');
+  beep(false);
+  focusInput();
+}
+
+/* =========================================================
+   Очистить всё
+   ========================================================= */
+async function clearAll() {
+  if (log.length === 0) return;
+  if (!confirm('Очистить весь лог (' + log.length + ' строк)?\n\nФайл на диске тоже будет перезаписан пустым.')) {
+    focusInput();
+    return;
+  }
+  log = [];
+  persist();
+  await writeToFile();
+  render();
+  focusInput();
+}
+
+/* =========================================================
+   Добавить запись
+   ========================================================= */
+async function addEntry(value) {
+  log.push({ time: now(), value });
+  persist();
+  await writeToFile();
+  render('new');
+  input.value = '';
+  beep(true);
+  focusInput();
+}
+
+/* =========================================================
+   Ввод
+   ========================================================= */
+input.addEventListener('keydown', async function(e) {
+  if (e.key === 'Enter') {
+    e.preventDefault();
+    const val = input.value.trim();
+    if (!val) return;
+    await addEntry(val);
+  }
+});
+
+document.addEventListener('click', function(e) {
+  const t = e.target;
+  if (t.tagName === 'INPUT' || t.tagName === 'BUTTON' || t.tagName === 'A') return;
+  if (t.closest && t.closest('.numpad')) return;
+  focusInput();
+});
+
+window.addEventListener('focus', focusInput);
+
+/* =========================================================
+   Init
+   ========================================================= */
+function init() {
+  restore();
+  render();
+  initNumpad();
+
+  if (!window.showSaveFilePicker) {
+    btnSave.style.display = 'none';
+  }
+
+  // Попытка зафиксировать портретную ориентацию.
+  // В обычном браузере без fullscreen скорее всего не сработает —
+  // просто молча игнорируем отказ.
+  try {
+    if (screen.orientation && screen.orientation.lock) {
+      screen.orientation.lock('portrait').catch(() => {});
+    }
+  } catch (e) {}
+
+  renderStatus();
+  input.disabled = false;
+  input.focus();
+}
+
+init();
+</script>
+</body>
+</html>
